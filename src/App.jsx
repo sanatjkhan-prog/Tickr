@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ChevronLeft, Globe, RotateCcw, Flame, Trophy, BellRing, Stars, PlusCircle, Sparkles } from 'lucide-react';
+import { ChevronLeft, Globe, RotateCcw, Flame, Trophy, Stars, PlusCircle } from 'lucide-react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot, increment } from 'firebase/firestore';
 
-const STORAGE_KEY = 'tickr_v4';
+const STORAGE_KEY = 'tickr_v5';
 const FB_PATH = ['tickr', 'prod', 'public', 'global_stats'];
 const DEFAULT_DHIKRS = [
   { id: 'astaghfirullah', label: 'Astaghfirullah', arabic: 'أستغفر الله' },
@@ -16,13 +16,13 @@ const DEFAULT_DHIKRS = [
 
 const CelebrationParticles = () => (
   <div className="fixed inset-0 pointer-events-none z-[200] overflow-hidden">
-    {[...Array(30)].map((_, i) => (
+    {[...Array(40)].map((_, i) => (
       <div key={i} className="absolute animate-particle" style={{
         left: `${Math.random() * 100}%`, top: '110%',
-        fontSize: `${Math.random() * 10 + 5}px`,
-        animationDelay: `${Math.random() * 3}s`,
-        animationDuration: `${Math.random() * 2 + 3}s`,
-        color: ['#fde047','#f97316','#4ade80','#60a5fa'][Math.floor(Math.random()*4)]
+        fontSize: `${Math.random() * 12 + 6}px`,
+        animationDelay: `${Math.random() * 2}s`,
+        animationDuration: `${Math.random() * 2 + 2}s`,
+        color: ['#fde047','#f97316','#4ade80','#60a5fa','#f472b6'][Math.floor(Math.random()*5)]
       }}>✦</div>
     ))}
   </div>
@@ -37,6 +37,8 @@ export default function App() {
   const [dhikrs, setDhikrs] = useState({});
   const [streak, setStreak] = useState({ count: 0, lastDate: null });
   const [annualGoal, setAnnualGoal] = useState(100000);
+  const [dailyGoal, setDailyGoal] = useState(100);
+  const [dailyCount, setDailyCount] = useState({ count: 0, date: null });
   const [reminderTime, setReminderTime] = useState("20:00");
   const [isRemindersEnabled, setIsRemindersEnabled] = useState(false);
   const [globalStats, setGlobalStats] = useState({ totalDhikr: 0 });
@@ -71,6 +73,8 @@ export default function App() {
         setDhikrs(parsed.dhikrs || {});
         setStreak(parsed.streak || { count: 0, lastDate: null });
         setAnnualGoal(parsed.annualGoal || 100000);
+        setDailyGoal(parsed.dailyGoal || 100);
+        setDailyCount(parsed.dailyCount || { count: 0, date: null });
         setReminderTime(parsed.reminderTime || "20:00");
         setIsRemindersEnabled(parsed.isRemindersEnabled || false);
       } catch (e) {}
@@ -85,30 +89,40 @@ export default function App() {
   useEffect(() => {
     if (!user || !db) return;
     const ref = doc(db, ...FB_PATH);
-    return onSnapshot(ref, (s) => s.exists() && setGlobalStats(s.data()), () => {});
+    return onSnapshot(ref, (s) => {
+      if (s.exists()) setGlobalStats(s.data());
+    }, (err) => console.error('Firestore error:', err));
   }, [user, db]);
 
   useEffect(() => {
-    if (isLoaded) localStorage.setItem(STORAGE_KEY, JSON.stringify({ dhikrs, streak, annualGoal, reminderTime, isRemindersEnabled }));
-  }, [dhikrs, isLoaded, streak, annualGoal, reminderTime, isRemindersEnabled]);
+    if (isLoaded) localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      dhikrs, streak, annualGoal, dailyGoal, dailyCount, reminderTime, isRemindersEnabled
+    }));
+  }, [dhikrs, isLoaded, streak, annualGoal, dailyGoal, dailyCount, reminderTime, isRemindersEnabled]);
 
   useEffect(() => {
     if (!isRemindersEnabled) return;
     const check = setInterval(() => {
       const now = new Date();
       const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-      if (timeStr === reminderTime && streak.lastDate !== now.toDateString()) {
+      if (timeStr === reminderTime && dailyCount.date !== now.toDateString()) {
         if (Notification.permission === "granted") {
           new Notification("Tickr", { body: "Have you done your dhikr today? Keep the flame alive." });
         }
       }
     }, 60000);
     return () => clearInterval(check);
-  }, [isRemindersEnabled, reminderTime, streak.lastDate]);
+  }, [isRemindersEnabled, reminderTime, dailyCount.date]);
 
   const totalLifetime = Object.values(dhikrs).reduce((sum, d) => sum + (d.lifetimeTotal || 0), 0);
-  const isGoalMet = totalLifetime >= annualGoal;
-  const progressPercent = Math.min(100, Math.floor((totalLifetime / (annualGoal || 1)) * 100));
+  const isAnnualGoalMet = totalLifetime >= annualGoal;
+  const annualProgressPercent = Math.min(100, Math.floor((totalLifetime / (annualGoal || 1)) * 100));
+
+  const today = new Date().toDateString();
+  const todayCount = dailyCount.date === today ? dailyCount.count : 0;
+  const isDailyGoalMet = todayCount >= dailyGoal;
+  const dailyProgressPercent = Math.min(100, Math.floor((todayCount / (dailyGoal || 1)) * 100));
+
   const dailyPacing = Math.ceil(annualGoal / 365);
   const weeklyPacing = Math.ceil(annualGoal / 52);
   const monthlyPacing = Math.ceil(annualGoal / 12);
@@ -134,6 +148,15 @@ export default function App() {
       return;
     }
     updateStreak();
+
+    const today = new Date().toDateString();
+    let newDailyCount = 0;
+
+    setDailyCount(prev => {
+      newDailyCount = prev.date === today ? prev.count + 1 : 1;
+      return { count: newDailyCount, date: today };
+    });
+
     setDhikrs(prev => {
       const d = prev[activeDhikrId];
       const newCount = (d.currentCount || 0) + 1;
@@ -143,6 +166,7 @@ export default function App() {
         const ref = doc(db, ...FB_PATH);
         setDoc(ref, { totalDhikr: increment(10) }, { merge: true }).catch(() => {});
       }
+      // Annual goal celebration
       if (totalLifetime + 1 === annualGoal) {
         setShowCelebration(true);
         if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200]);
@@ -151,7 +175,19 @@ export default function App() {
       }
       return { ...prev, [activeDhikrId]: { ...d, currentCount: newCount, lifetimeTotal: newLifetime } };
     });
-  }, [activeDhikrId, isResetConfirming, annualGoal, totalLifetime, updateStreak, user, db, addNotification]);
+  }, [activeDhikrId, isResetConfirming, annualGoal, totalLifetime, updateStreak, user, db, addNotification, dailyGoal]);
+
+  // Daily goal celebration — watch dailyCount
+  useEffect(() => {
+    if (!isLoaded) return;
+    const today = new Date().toDateString();
+    if (dailyCount.date === today && dailyCount.count === dailyGoal) {
+      setShowCelebration(true);
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200]);
+      addNotification("🎉 Daily goal reached!");
+      setTimeout(() => setShowCelebration(false), 6000);
+    }
+  }, [dailyCount, dailyGoal, isLoaded, addNotification]);
 
   const handleReset = useCallback((e) => {
     e.stopPropagation();
@@ -204,7 +240,7 @@ export default function App() {
       <div className="h-full max-w-md mx-auto relative border-x border-white/5 flex flex-col">
         {view === 'picker' && (
           <div className="flex-1 p-8 overflow-y-auto pb-32">
-            <header className="mb-10 text-center pt-8">
+            <header className="mb-8 text-center pt-8">
               <div className="flex justify-between items-center mb-6">
                 <button onClick={() => setIsSettingsOpen(true)} className="flex items-center gap-2 bg-orange-500/10 px-3 py-1 rounded-full border border-orange-500/20 text-orange-500 text-[10px] font-bold tracking-widest">
                   <Flame size={12} /> {streak.count} DAYS
@@ -212,14 +248,34 @@ export default function App() {
                 <div className="flex items-center gap-1 opacity-20 text-[8px] tracking-widest uppercase">
                   <Globe size={10} /> {globalStats.totalDhikr?.toLocaleString() || 0}
                 </div>
-                <button onClick={() => setIsGoalModalOpen(true)} className={`flex items-center gap-2 px-3 py-1 rounded-full border text-[10px] font-black tracking-widest transition-all ${isGoalMet ? 'gold-shimmer border-transparent text-black' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>
-                  <Trophy size={12} /> {isGoalMet ? 'COMPLETE' : `${progressPercent}%`}
+                <button onClick={() => setIsGoalModalOpen(true)} className={`flex items-center gap-2 px-3 py-1 rounded-full border text-[10px] font-black tracking-widest transition-all ${isAnnualGoalMet ? 'gold-shimmer border-transparent text-black' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>
+                  <Trophy size={12} /> {isAnnualGoalMet ? 'COMPLETE' : `${annualProgressPercent}%`}
                 </button>
               </div>
+
               <h1 className="text-3xl font-serif tracking-[0.3em] mb-2">T I C K R</h1>
-              <p className="text-[9px] opacity-30 uppercase tracking-[0.4em] mb-6">{totalLifetime.toLocaleString()} Total Taps</p>
-              <button onClick={() => setIsGoalModalOpen(true)} className="mx-auto flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-full text-[10px] uppercase tracking-widest text-white/60 transition-colors">
-                <PlusCircle size={12} /> Set Annual Aspiration
+              <p className="text-[9px] opacity-30 uppercase tracking-[0.4em] mb-5">{totalLifetime.toLocaleString()} Total Taps</p>
+
+              {/* Daily Progress */}
+              <button onClick={() => setIsGoalModalOpen(true)} className="w-full mb-3">
+                <div className="flex justify-between items-center mb-1">
+                  <p className="text-[8px] uppercase tracking-widest opacity-30">Today</p>
+                  <p className="text-[8px] uppercase tracking-widest opacity-30">{todayCount} / {dailyGoal}</p>
+                </div>
+                <div className="w-full h-[2px] bg-white/10 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all duration-300 ${isDailyGoalMet ? 'gold-shimmer' : 'bg-blue-400/60'}`} style={{ width: `${dailyProgressPercent}%` }} />
+                </div>
+              </button>
+
+              {/* Annual Progress */}
+              <button onClick={() => setIsGoalModalOpen(true)} className="w-full">
+                <div className="flex justify-between items-center mb-1">
+                  <p className="text-[8px] uppercase tracking-widest opacity-30">Annual Goal</p>
+                  <p className="text-[8px] uppercase tracking-widest opacity-30">{totalLifetime.toLocaleString()} / {annualGoal.toLocaleString()}</p>
+                </div>
+                <div className="w-full h-[2px] bg-white/10 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all duration-500 ${isAnnualGoalMet ? 'gold-shimmer' : 'bg-emerald-500/60'}`} style={{ width: `${annualProgressPercent}%` }} />
+                </div>
               </button>
             </header>
 
@@ -236,7 +292,7 @@ export default function App() {
             </div>
 
             <button onClick={() => setIsStoryOpen(true)} className="mt-8 w-full p-5 border border-white/10 bg-white/5 rounded-2xl flex items-center justify-center gap-3 text-white/50 text-[10px] uppercase tracking-[0.3em] active:scale-95 transition-all">
-              <Stars size={14} className={isGoalMet ? 'text-yellow-400' : ''} />
+              <Stars size={14} className={isAnnualGoalMet ? 'text-yellow-400' : ''} />
               <span>View Your Story</span>
             </button>
           </div>
@@ -255,9 +311,14 @@ export default function App() {
               </button>
             </div>
             <div className="flex-1 flex flex-col justify-center items-center">
-              <p className={`text-[10rem] font-sans font-extralight tracking-tighter transition-all ${isGoalMet ? 'text-yellow-100' : ''}`}>
+              <p className={`text-[10rem] font-sans font-extralight tracking-tighter transition-all ${isDailyGoalMet ? 'text-yellow-100' : ''}`}>
                 {dhikrs[activeDhikrId].currentCount?.toLocaleString()}
               </p>
+              <div className="w-48 mt-4">
+                <div className="w-full h-[1px] bg-white/10 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all duration-300 ${isDailyGoalMet ? 'gold-shimmer' : 'bg-blue-400/40'}`} style={{ width: `${dailyProgressPercent}%` }} />
+                </div>
+              </div>
             </div>
             <div className="p-12 text-center opacity-20 text-[9px] uppercase tracking-[0.3em]">
               {isResetConfirming ? "Tap icon again to reset" : "Tap to count"}
@@ -268,7 +329,7 @@ export default function App() {
         {isSettingsOpen && (
           <div className="fixed inset-0 z-[500] bg-black/95 backdrop-blur-3xl flex items-center justify-center p-6">
             <div className="w-full max-w-sm space-y-6 slide-up">
-              <h2 className="text-xl font-serif tracking-widest uppercase text-center">Settings & Guide</h2>
+              <h2 className="text-xl font-serif tracking-widest uppercase text-center">Settings</h2>
               <div className="p-5 bg-white/5 rounded-2xl border border-white/10 space-y-4">
                 <div className="flex justify-between items-center">
                   <div>
@@ -303,15 +364,26 @@ export default function App() {
 
         {isGoalModalOpen && (
           <div className="fixed inset-0 z-[300] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-6">
-            <div className="w-full max-w-sm space-y-8 slide-up">
+            <div className="w-full max-w-sm space-y-6 slide-up">
               <div className="text-center">
-                <h2 className="text-2xl font-serif tracking-widest uppercase">Annual Aspiration</h2>
-                <p className="text-[10px] uppercase tracking-[0.2em] opacity-40 mt-2">Your target for the year</p>
+                <h2 className="text-2xl font-serif tracking-widest uppercase">Goals</h2>
+                <p className="text-[10px] uppercase tracking-[0.2em] opacity-40 mt-2">Set your targets</p>
               </div>
-              <div className="text-center space-y-6 bg-white/[0.03] p-8 rounded-[2rem] border border-white/5">
-                <div className="text-5xl font-serif text-yellow-400">{annualGoal.toLocaleString()}</div>
+
+              {/* Daily Goal */}
+              <div className="bg-white/[0.03] p-6 rounded-[2rem] border border-white/5 space-y-4">
+                <p className="text-[9px] uppercase tracking-widest opacity-40 text-center">Daily Goal</p>
+                <div className="text-4xl font-serif text-blue-400 text-center">{dailyGoal.toLocaleString()}</div>
+                <input type="range" min="10" max="1000" step="10" value={dailyGoal} onChange={(e) => setDailyGoal(parseInt(e.target.value))} className="w-full accent-blue-400 h-1 bg-white/10 rounded-full appearance-none" />
+              </div>
+
+              {/* Annual Goal */}
+              <div className="bg-white/[0.03] p-6 rounded-[2rem] border border-white/5 space-y-4">
+                <p className="text-[9px] uppercase tracking-widest opacity-40 text-center">Annual Goal</p>
+                <div className="text-4xl font-serif text-yellow-400 text-center">{annualGoal.toLocaleString()}</div>
                 <input type="range" min="10000" max="1000000" step="10000" value={annualGoal} onChange={(e) => setAnnualGoal(parseInt(e.target.value))} className="w-full accent-yellow-400 h-1 bg-white/10 rounded-full appearance-none" />
               </div>
+
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
                   <p className="text-[8px] uppercase tracking-widest opacity-40 mb-1">Daily</p>
@@ -326,6 +398,7 @@ export default function App() {
                   <p className="text-sm font-medium">{monthlyPacing.toLocaleString()}</p>
                 </div>
               </div>
+
               <div className="space-y-3">
                 <button onClick={() => setIsGoalModalOpen(false)} className="w-full py-4 bg-white text-black rounded-2xl font-bold text-[10px] uppercase tracking-[0.3em]">Commit to Path</button>
                 <button onClick={() => setIsGoalModalOpen(false)} className="w-full py-4 border border-white/10 rounded-2xl text-[9px] uppercase tracking-[0.4em] text-white/40">Cancel</button>
@@ -344,14 +417,19 @@ export default function App() {
                   <p className="text-6xl font-serif">{totalLifetime.toLocaleString()}</p>
                 </div>
                 <div>
+                  <p className="text-[10px] uppercase tracking-[0.3em] text-blue-400 font-bold mb-2">Today</p>
+                  <p className="text-4xl font-serif">{todayCount} / {dailyGoal}</p>
+                </div>
+                <div>
                   <p className="text-[10px] uppercase tracking-[0.3em] text-emerald-400 font-bold mb-2">Annual Goal</p>
-                  <p className="text-4xl font-serif">{progressPercent}%</p>
+                  <p className="text-4xl font-serif">{annualProgressPercent}%</p>
                 </div>
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.3em] text-orange-400 font-bold mb-2">Day Streak</p>
                   <p className="text-4xl font-serif">{streak.count}</p>
                 </div>
-                {isGoalMet && <p className="text-yellow-400 text-xs uppercase tracking-widest">🏆 Goal Complete</p>}
+                {isAnnualGoalMet && <p className="text-yellow-400 text-xs uppercase tracking-widest">🏆 Annual Goal Complete</p>}
+                {isDailyGoalMet && <p className="text-blue-400 text-xs uppercase tracking-widest">🎉 Daily Goal Complete</p>}
               </div>
             </div>
             <button onClick={() => setIsStoryOpen(false)} className="mt-10 py-4 px-12 bg-white text-black rounded-xl font-bold text-[10px] uppercase tracking-widest">Return</button>
