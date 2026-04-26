@@ -5,6 +5,7 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot, increment } from 'firebase/firestore';
 
 const STORAGE_KEY = 'tickr_v4';
+const FB_PATH = ['tickr', 'prod', 'public', 'global_stats'];
 const DEFAULT_DHIKRS = [
   { id: 'astaghfirullah', label: 'Astaghfirullah', arabic: 'أستغفر الله' },
   { id: 'alhamdulillah', label: 'Alhamdulillah', arabic: 'الحمد لله' },
@@ -83,8 +84,8 @@ export default function App() {
 
   useEffect(() => {
     if (!user || !db) return;
-    const globalDoc = doc(db, 'artifacts', 'tickr-prod', 'public', 'data', 'global_stats');
-    return onSnapshot(globalDoc, (s) => s.exists() && setGlobalStats(s.data()), () => {});
+    const ref = doc(db, ...FB_PATH);
+    return onSnapshot(ref, (s) => s.exists() && setGlobalStats(s.data()), () => {});
   }, [user, db]);
 
   useEffect(() => {
@@ -139,8 +140,8 @@ export default function App() {
       const newLifetime = (d.lifetimeTotal || 0) + 1;
       if (navigator.vibrate) navigator.vibrate(10);
       if (user && db && newLifetime % 10 === 0) {
-        const globalRef = doc(db, 'artifacts', 'tickr-prod', 'public', 'data', 'global_stats');
-        setDoc(globalRef, { totalDhikr: increment(10) }, { merge: true }).catch(() => {});
+        const ref = doc(db, ...FB_PATH);
+        setDoc(ref, { totalDhikr: increment(10) }, { merge: true }).catch(() => {});
       }
       if (totalLifetime + 1 === annualGoal) {
         setShowCelebration(true);
