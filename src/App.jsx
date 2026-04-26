@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ChevronLeft, Globe, RotateCcw, Flame, Trophy, Stars, PlusCircle } from 'lucide-react';
+import { ChevronLeft, RotateCcw, Flame, Trophy, Stars, PlusCircle, Share } from 'lucide-react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot, increment } from 'firebase/firestore';
 
-const STORAGE_KEY = 'tickr_v5';
+const STORAGE_KEY = 'tickr_v6';
 const FB_PATH = ['tickr', 'prod', 'public', 'global_stats'];
 const DEFAULT_DHIKRS = [
   { id: 'astaghfirullah', label: 'Astaghfirullah', arabic: 'أستغفر الله' },
@@ -37,18 +37,25 @@ export default function App() {
   const [dhikrs, setDhikrs] = useState({});
   const [streak, setStreak] = useState({ count: 0, lastDate: null });
   const [annualGoal, setAnnualGoal] = useState(100000);
-  const [dailyGoal, setDailyGoal] = useState(100);
   const [dailyCount, setDailyCount] = useState({ count: 0, date: null });
   const [reminderTime, setReminderTime] = useState("20:00");
   const [isRemindersEnabled, setIsRemindersEnabled] = useState(false);
-  const [globalStats, setGlobalStats] = useState({ totalDhikr: 0 });
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [isStoryOpen, setIsStoryOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isInstallOpen, setIsInstallOpen] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [isResetConfirming, setIsResetConfirming] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
   const resetTimerRef = useRef(null);
+
+  // Capture install prompt on Android
+  useEffect(() => {
+    const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
 
   useEffect(() => {
     let configString = null;
@@ -73,7 +80,6 @@ export default function App() {
         setDhikrs(parsed.dhikrs || {});
         setStreak(parsed.streak || { count: 0, lastDate: null });
         setAnnualGoal(parsed.annualGoal || 100000);
-        setDailyGoal(parsed.dailyGoal || 100);
         setDailyCount(parsed.dailyCount || { count: 0, date: null });
         setReminderTime(parsed.reminderTime || "20:00");
         setIsRemindersEnabled(parsed.isRemindersEnabled || false);
@@ -87,18 +93,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user || !db) return;
-    const ref = doc(db, ...FB_PATH);
-    return onSnapshot(ref, (s) => {
-      if (s.exists()) setGlobalStats(s.data());
-    }, (err) => console.error('Firestore error:', err));
-  }, [user, db]);
-
-  useEffect(() => {
     if (isLoaded) localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      dhikrs, streak, annualGoal, dailyGoal, dailyCount, reminderTime, isRemindersEnabled
+      dhikrs, streak, annualGoal, dailyCount, reminderTime, isRemindersEnabled
     }));
-  }, [dhikrs, isLoaded, streak, annualGoal, dailyGoal, dailyCount, reminderTime, isRemindersEnabled]);
+  }, [dhikrs, isLoaded, streak, annualGoal, dailyCount, reminderTime, isRemindersEnabled]);
 
   useEffect(() => {
     if (!isRemindersEnabled) return;
@@ -118,12 +116,12 @@ export default function App() {
   const isAnnualGoalMet = totalLifetime >= annualGoal;
   const annualProgressPercent = Math.min(100, Math.floor((totalLifetime / (annualGoal || 1)) * 100));
 
+  const dailyGoal = Math.ceil(annualGoal / 365);
   const today = new Date().toDateString();
   const todayCount = dailyCount.date === today ? dailyCount.count : 0;
   const isDailyGoalMet = todayCount >= dailyGoal;
   const dailyProgressPercent = Math.min(100, Math.floor((todayCount / (dailyGoal || 1)) * 100));
 
-  const dailyPacing = Math.ceil(annualGoal / 365);
   const weeklyPacing = Math.ceil(annualGoal / 52);
   const monthlyPacing = Math.ceil(annualGoal / 12);
 
@@ -160,10 +158,6 @@ export default function App() {
       const newCount = (d.currentCount || 0) + 1;
       const newLifetime = (d.lifetimeTotal || 0) + 1;
       if (navigator.vibrate) navigator.vibrate(10);
-      if (user && db && newLifetime % 10 === 0) {
-        const ref = doc(db, ...FB_PATH);
-        setDoc(ref, { totalDhikr: increment(10) }, { merge: true }).catch(() => {});
-      }
       if (totalLifetime + 1 === annualGoal) {
         setShowCelebration(true);
         if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200]);
@@ -172,7 +166,7 @@ export default function App() {
       }
       return { ...prev, [activeDhikrId]: { ...d, currentCount: newCount, lifetimeTotal: newLifetime } };
     });
-  }, [activeDhikrId, isResetConfirming, annualGoal, totalLifetime, updateStreak, user, db, addNotification]);
+  }, [activeDhikrId, isResetConfirming, annualGoal, totalLifetime, updateStreak, addNotification]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -203,6 +197,19 @@ export default function App() {
     const permission = await Notification.requestPermission();
     if (permission === "granted") { setIsRemindersEnabled(true); addNotification("Reminders enabled ✓"); }
     else { addNotification("Permission denied"); }
+  };
+
+  const handleInstall = async () => {
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    if (isIOS) { setIsInstallOpen(true); return; }
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const result = await deferredPrompt.userChoice;
+      if (result.outcome === 'accepted') addNotification("App installed ✓");
+      setDeferredPrompt(null);
+    } else {
+      setIsInstallOpen(true);
+    }
   };
 
   if (!isLoaded) return <div className="h-screen bg-black" />;
@@ -241,9 +248,6 @@ export default function App() {
                 <button onClick={() => setIsSettingsOpen(true)} className="flex items-center gap-2 bg-orange-500/10 px-3 py-1 rounded-full border border-orange-500/20 text-orange-500 text-[10px] font-bold tracking-widest">
                   <Flame size={12} /> {streak.count} DAYS
                 </button>
-                <div className="flex items-center gap-1 opacity-20 text-[8px] tracking-widest uppercase">
-                  <Globe size={10} /> {globalStats.totalDhikr?.toLocaleString() || 0}
-                </div>
                 <button onClick={() => setIsGoalModalOpen(true)} className={`flex items-center gap-2 px-3 py-1 rounded-full border text-[10px] font-black tracking-widest transition-all ${isAnnualGoalMet ? 'gold-shimmer border-transparent text-black' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>
                   <Trophy size={12} /> {isAnnualGoalMet ? 'COMPLETE' : `${annualProgressPercent}%`}
                 </button>
@@ -297,10 +301,16 @@ export default function App() {
               ))}
             </div>
 
-            <button onClick={() => setIsStoryOpen(true)} className="mt-8 w-full p-5 border border-white/10 bg-white/5 rounded-2xl flex items-center justify-center gap-3 text-white/50 text-[10px] uppercase tracking-[0.3em] active:scale-95 transition-all">
-              <Stars size={14} className={isAnnualGoalMet ? 'text-yellow-400' : ''} />
-              <span>View Your Story</span>
-            </button>
+            <div className="mt-8 space-y-3">
+              <button onClick={() => setIsStoryOpen(true)} className="w-full p-5 border border-white/10 bg-white/5 rounded-2xl flex items-center justify-center gap-3 text-white/50 text-[10px] uppercase tracking-[0.3em] active:scale-95 transition-all">
+                <Stars size={14} className={isAnnualGoalMet ? 'text-yellow-400' : ''} />
+                <span>View Your Story</span>
+              </button>
+              <button onClick={handleInstall} className="w-full p-4 border border-white/10 bg-white/5 rounded-2xl flex items-center justify-center gap-3 text-white/30 text-[10px] uppercase tracking-[0.3em] active:scale-95 transition-all">
+                <Share size={12} />
+                <span>Add to Home Screen</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -372,26 +382,19 @@ export default function App() {
           <div className="fixed inset-0 z-[300] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-6">
             <div className="w-full max-w-sm space-y-6 slide-up">
               <div className="text-center">
-                <h2 className="text-2xl font-serif tracking-widest uppercase">Goals</h2>
-                <p className="text-[10px] uppercase tracking-[0.2em] opacity-40 mt-2">Set your targets</p>
+                <h2 className="text-2xl font-serif tracking-widest uppercase">Annual Goal</h2>
+                <p className="text-[10px] uppercase tracking-[0.2em] opacity-40 mt-2">Your target for the year</p>
               </div>
 
               <div className="bg-white/[0.03] p-6 rounded-[2rem] border border-white/5 space-y-4">
-                <p className="text-[9px] uppercase tracking-widest opacity-40 text-center">Daily Goal</p>
-                <div className="text-4xl font-serif text-blue-400 text-center">{dailyGoal.toLocaleString()}</div>
-                <input type="range" min="10" max="1000" step="10" value={dailyGoal} onChange={(e) => setDailyGoal(parseInt(e.target.value))} className="w-full accent-blue-400 h-1 bg-white/10 rounded-full appearance-none" />
-              </div>
-
-              <div className="bg-white/[0.03] p-6 rounded-[2rem] border border-white/5 space-y-4">
-                <p className="text-[9px] uppercase tracking-widest opacity-40 text-center">Annual Goal</p>
-                <div className="text-4xl font-serif text-yellow-400 text-center">{annualGoal.toLocaleString()}</div>
+                <div className="text-5xl font-serif text-yellow-400 text-center">{annualGoal.toLocaleString()}</div>
                 <input type="range" min="10000" max="1000000" step="10000" value={annualGoal} onChange={(e) => setAnnualGoal(parseInt(e.target.value))} className="w-full accent-yellow-400 h-1 bg-white/10 rounded-full appearance-none" />
               </div>
 
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
                   <p className="text-[8px] uppercase tracking-widest opacity-40 mb-1">Daily</p>
-                  <p className="text-sm font-medium">{dailyPacing.toLocaleString()}</p>
+                  <p className="text-sm font-medium">{dailyGoal.toLocaleString()}</p>
                 </div>
                 <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
                   <p className="text-[8px] uppercase tracking-widest opacity-40 mb-1">Weekly</p>
@@ -437,6 +440,29 @@ export default function App() {
               </div>
             </div>
             <button onClick={() => setIsStoryOpen(false)} className="mt-10 py-4 px-12 bg-white text-black rounded-xl font-bold text-[10px] uppercase tracking-widest">Return</button>
+          </div>
+        )}
+
+        {isInstallOpen && (
+          <div className="fixed inset-0 z-[600] bg-black/95 backdrop-blur-3xl flex items-center justify-center p-6">
+            <div className="w-full max-w-sm space-y-8 slide-up text-center">
+              <h2 className="text-2xl font-serif tracking-widest uppercase">Add to Home Screen</h2>
+              <div className="space-y-6 text-left">
+                <div className="flex items-start gap-4 p-4 bg-white/5 rounded-2xl border border-white/10">
+                  <span className="text-white/40 text-[10px] uppercase tracking-widest mt-1">1</span>
+                  <p className="text-sm text-white/60">Tap the <strong className="text-white">Share</strong> button at the bottom of your browser</p>
+                </div>
+                <div className="flex items-start gap-4 p-4 bg-white/5 rounded-2xl border border-white/10">
+                  <span className="text-white/40 text-[10px] uppercase tracking-widest mt-1">2</span>
+                  <p className="text-sm text-white/60">Scroll down and tap <strong className="text-white">Add to Home Screen</strong></p>
+                </div>
+                <div className="flex items-start gap-4 p-4 bg-white/5 rounded-2xl border border-white/10">
+                  <span className="text-white/40 text-[10px] uppercase tracking-widest mt-1">3</span>
+                  <p className="text-sm text-white/60">Tap <strong className="text-white">Add</strong> to confirm</p>
+                </div>
+              </div>
+              <button onClick={() => setIsInstallOpen(false)} className="w-full py-4 bg-white text-black rounded-2xl font-bold text-[10px] uppercase tracking-[0.4em]">Got It</button>
+            </div>
           </div>
         )}
       </div>
