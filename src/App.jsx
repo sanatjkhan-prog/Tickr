@@ -150,11 +150,9 @@ export default function App() {
     updateStreak();
 
     const today = new Date().toDateString();
-    let newDailyCount = 0;
-
     setDailyCount(prev => {
-      newDailyCount = prev.date === today ? prev.count + 1 : 1;
-      return { count: newDailyCount, date: today };
+      const newCount = prev.date === today ? prev.count + 1 : 1;
+      return { count: newCount, date: today };
     });
 
     setDhikrs(prev => {
@@ -166,7 +164,6 @@ export default function App() {
         const ref = doc(db, ...FB_PATH);
         setDoc(ref, { totalDhikr: increment(10) }, { merge: true }).catch(() => {});
       }
-      // Annual goal celebration
       if (totalLifetime + 1 === annualGoal) {
         setShowCelebration(true);
         if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200]);
@@ -175,9 +172,8 @@ export default function App() {
       }
       return { ...prev, [activeDhikrId]: { ...d, currentCount: newCount, lifetimeTotal: newLifetime } };
     });
-  }, [activeDhikrId, isResetConfirming, annualGoal, totalLifetime, updateStreak, user, db, addNotification, dailyGoal]);
+  }, [activeDhikrId, isResetConfirming, annualGoal, totalLifetime, updateStreak, user, db, addNotification]);
 
-  // Daily goal celebration — watch dailyCount
   useEffect(() => {
     if (!isLoaded) return;
     const today = new Date().toDateString();
@@ -257,29 +253,39 @@ export default function App() {
               <p className="text-[9px] opacity-30 uppercase tracking-[0.4em] mb-5">{totalLifetime.toLocaleString()} Total Taps</p>
 
               {/* Daily Progress */}
-              <button onClick={() => setIsGoalModalOpen(true)} className="w-full mb-3">
+              <div className="w-full mb-3">
                 <div className="flex justify-between items-center mb-1">
                   <p className="text-[8px] uppercase tracking-widest opacity-30">Today</p>
-                  <p className="text-[8px] uppercase tracking-widest opacity-30">{todayCount} / {dailyGoal}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[8px] uppercase tracking-widest opacity-30">{todayCount} / {dailyGoal}</p>
+                    <button onClick={() => setIsGoalModalOpen(true)} className="opacity-20 hover:opacity-60 transition-opacity">
+                      <PlusCircle size={10} />
+                    </button>
+                  </div>
                 </div>
                 <div className="w-full h-[2px] bg-white/10 rounded-full overflow-hidden">
                   <div className={`h-full rounded-full transition-all duration-300 ${isDailyGoalMet ? 'gold-shimmer' : 'bg-blue-400/60'}`} style={{ width: `${dailyProgressPercent}%` }} />
                 </div>
-              </button>
+              </div>
 
               {/* Annual Progress */}
-              <button onClick={() => setIsGoalModalOpen(true)} className="w-full">
+              <div className="w-full">
                 <div className="flex justify-between items-center mb-1">
                   <p className="text-[8px] uppercase tracking-widest opacity-30">Annual Goal</p>
-                  <p className="text-[8px] uppercase tracking-widest opacity-30">{totalLifetime.toLocaleString()} / {annualGoal.toLocaleString()}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[8px] uppercase tracking-widest opacity-30">{totalLifetime.toLocaleString()} / {annualGoal.toLocaleString()}</p>
+                    <button onClick={() => setIsGoalModalOpen(true)} className="opacity-20 hover:opacity-60 transition-opacity">
+                      <PlusCircle size={10} />
+                    </button>
+                  </div>
                 </div>
                 <div className="w-full h-[2px] bg-white/10 rounded-full overflow-hidden">
                   <div className={`h-full rounded-full transition-all duration-500 ${isAnnualGoalMet ? 'gold-shimmer' : 'bg-emerald-500/60'}`} style={{ width: `${annualProgressPercent}%` }} />
                 </div>
-              </button>
+              </div>
             </header>
 
-            <div className="space-y-4">
+            <div className="space-y-4 mt-6">
               {Object.values(dhikrs).map(d => (
                 <button key={d.id} onClick={() => { setActiveDhikrId(d.id); setView('counter'); }} className="w-full p-6 border border-white/10 rounded-2xl flex justify-between items-center bg-white/[0.02] active:scale-95 transition-all">
                   <div className="text-left">
@@ -370,14 +376,12 @@ export default function App() {
                 <p className="text-[10px] uppercase tracking-[0.2em] opacity-40 mt-2">Set your targets</p>
               </div>
 
-              {/* Daily Goal */}
               <div className="bg-white/[0.03] p-6 rounded-[2rem] border border-white/5 space-y-4">
                 <p className="text-[9px] uppercase tracking-widest opacity-40 text-center">Daily Goal</p>
                 <div className="text-4xl font-serif text-blue-400 text-center">{dailyGoal.toLocaleString()}</div>
                 <input type="range" min="10" max="1000" step="10" value={dailyGoal} onChange={(e) => setDailyGoal(parseInt(e.target.value))} className="w-full accent-blue-400 h-1 bg-white/10 rounded-full appearance-none" />
               </div>
 
-              {/* Annual Goal */}
               <div className="bg-white/[0.03] p-6 rounded-[2rem] border border-white/5 space-y-4">
                 <p className="text-[9px] uppercase tracking-widest opacity-40 text-center">Annual Goal</p>
                 <div className="text-4xl font-serif text-yellow-400 text-center">{annualGoal.toLocaleString()}</div>
